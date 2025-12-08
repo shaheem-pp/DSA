@@ -1,142 +1,192 @@
-name: Create Daily DSA Folder
+name: Create Daily Coding Folder
 
+# Workflow triggers
+# This workflow can be triggered manually from the GitHub Actions tab
 on:
   workflow_dispatch:
     inputs:
-      day_number:
-        description: 'Day number (optional - will auto-increment if not provided)'
+      copy_template:
+        description: 'Copy template files to new folder'
         required: false
-        type: string
-  schedule:
-    # Run at 00:00 UTC every day (adjust timezone as needed)
-    - cron: '0 0 * * *'
+        default: true
+        type: boolean
+
+# Define permissions for the workflow
+permissions:
+  contents: write
 
 jobs:
   create-folder:
+    name: Create Next Day Folder
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     
     steps:
+      # Step 1: Checkout the repository
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 0  # Fetch all history for accurate folder detection
       
-      - name: Set up Git
+      # Step 2: Set up Git configuration
+      - name: Configure Git
         run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
       
-      - name: Determine next day number
-        id: get_day
+      # Step 3: Find the next day number and create folder
+      - name: Create next day folder
+        id: create_folder
         run: |
-          if [ -n "${{ github.event.inputs.day_number }}" ]; then
-            DAY_NUM="${{ github.event.inputs.day_number }}"
+          #!/bin/bash
+          
+          # Find all existing day folders (format: dayXXX)
+          # Sort them numerically and get the highest number
+          LAST_DAY=$(find . -maxdepth 1 -type d -name "day[0-9][0-9][0-9]" | \
+                     sed 's/.*day//' | \
+                     sort -n | \
+                     tail -1)
+          
+          # If no folders exist, start with day001
+          if [ -z "$LAST_DAY" ]; then
+            NEXT_DAY=1
           else
-            # Find the highest existing day folder
-            LAST_DAY=$(ls -d day??? 2>/dev/null | sort -r | head -n 1 | grep -oE '[0-9]+' || echo "0")
-            DAY_NUM=$((LAST_DAY + 1))
+            NEXT_DAY=$((LAST_DAY + 1))
           fi
           
-          # Format with leading zeros (day001, day002, etc.)
-          DAY_FORMATTED=$(printf "day%03d" $DAY_NUM)
-          echo "day_folder=$DAY_FORMATTED" >> $GITHUB_OUTPUT
-          echo "Creating folder: $DAY_FORMATTED"
-      
-      - name: Create daily folder
-        run: |
-          FOLDER="${{ steps.get_day.outputs.day_folder }}"
-          
-          # Check if folder already exists
-          if [ -d "$FOLDER" ]; then
-            echo "Folder $FOLDER already exists. Skipping creation."
-            echo "skip=true" >> $GITHUB_ENV
-            exit 0
-          fi
+          # Format the day number with leading zeros (e.g., 001, 002, 010, 100)
+          FOLDER_NAME=$(printf "day%03d" $NEXT_DAY)
           
           # Create the folder
-          mkdir -p "$FOLDER"
+          mkdir -p "$FOLDER_NAME"
           
-          # Create template app.py
-          cat > "$FOLDER/app.py" << 'EOF'
-# Day ${FOLDER} - DSA Practice
-
-def main():
-    pass
-
-if __name__ == "__main__":
-    main()
-EOF
-          
-          # Create a README for the day
-          cat > "$FOLDER/README.md" << EOF
-# ${FOLDER}
-
-## Problems Solved Today
-
-- [ ] Problem 1
-- [ ] Problem 2
-- [ ] Problem 3
-
-## Notes
-
-Add your notes here...
-EOF
-          
-          echo "Created folder: $FOLDER"
-          echo "skip=false" >> $GITHUB_ENV
+          echo "Created folder: $FOLDER_NAME"
+          echo "folder_name=$FOLDER_NAME" >> $GITHUB_OUTPUT
+          echo "day_number=$NEXT_DAY" >> $GITHUB_OUTPUT
       
-      - name: Verify folder structure
+      # Step 4: Copy template files if they exist and if requested
+      - name: Copy template files
+        if: ${{ inputs.copy_template == 'true' || inputs.copy_template == true }}
         run: |
-          if [ "${{ env.skip }}" = "true" ]; then
-            echo "Skipping verification"
-            exit 0
+          FOLDER_NAME="${{ steps.create_folder.outputs.folder_name }}"
+          DAY_NUMBER="${{ steps.create_folder.outputs.day_number }}"
+          
+          # Check if template directory exists
+          if [ -d ".github/templates/day-template" ]; then
+            echo "Copying template files to $FOLDER_NAME..."
+            cp -r .github/templates/day-template/* "$FOLDER_NAME/"
+            echo "Template files copied successfully"
+          else
+            # Create default app.py if no template exists
+            echo "No template found. Creating default app.py..."
+            echo '#!/usr/bin/env python3' > "$FOLDER_NAME/app.py"
+            echo '# Coding Practice' >> "$FOLDER_NAME/app.py"
+            echo '' >> "$FOLDER_NAME/app.py"
+            echo 'def main():' >> "$FOLDER_NAME/app.py"
+            echo '    print("Let'"'"'s code!")' >> "$FOLDER_NAME/app.py"
+            echo '    pass' >> "$FOLDER_NAME/app.py"
+            echo '' >> "$FOLDER_NAME/app.py"
+            echo 'if __name__ == "__main__":' >> "$FOLDER_NAME/app.py"
+            echo '    main()' >> "$FOLDER_NAME/app.py"
+            echo "Default app.py created"
           fi
-          
-          FOLDER="${{ steps.get_day.outputs.day_folder }}"
-          
-          echo "=== Final Verification ==="
-          echo "Folder created: $FOLDER"
-          echo ""
-          echo "Contents:"
-          ls -la "$FOLDER"
-          echo ""
-          echo "Files created:"
-          find "$FOLDER" -type f -exec echo "  - {}" \;
-          echo ""
-          echo "File previews:"
-          for file in "$FOLDER"/*; do
-            if [ -f "$file" ]; then
-              echo "--- $(basename $file) ---"
-              head -n 5 "$file"
-              echo ""
-            fi
-          done
-          
-          # Verify required files exist
-          if [ ! -f "$FOLDER/app.py" ]; then
-            echo "❌ ERROR: app.py not found!"
-            exit 1
-          fi
-          
-          if [ ! -f "$FOLDER/README.md" ]; then
-            echo "❌ ERROR: README.md not found!"
-            exit 1
-          fi
-          
-          echo "✅ All required files verified"
       
+      # Step 5: Create a README for the new day folder
+      - name: Create README for new day
+        run: |
+          FOLDER_NAME="${{ steps.create_folder.outputs.folder_name }}"
+          DAY_NUMBER="${{ steps.create_folder.outputs.day_number }}"
+          
+          echo "# Day $DAY_NUMBER - Coding Practice" > "$FOLDER_NAME/README.md"
+          echo "" >> "$FOLDER_NAME/README.md"
+          echo "**Date Created:** $(date +\"%B %d, %Y\")" >> "$FOLDER_NAME/README.md"
+          echo "" >> "$FOLDER_NAME/README.md"
+          echo "## Problems" >> "$FOLDER_NAME/README.md"
+          echo "" >> "$FOLDER_NAME/README.md"
+          echo "<!-- Add your problems here -->" >> "$FOLDER_NAME/README.md"
+          echo "" >> "$FOLDER_NAME/README.md"
+          echo "## Notes" >> "$FOLDER_NAME/README.md"
+          echo "" >> "$FOLDER_NAME/README.md"
+          echo "<!-- Add your notes here -->" >> "$FOLDER_NAME/README.md"
+          echo "" >> "$FOLDER_NAME/README.md"
+          echo "## Solutions" >> "$FOLDER_NAME/README.md"
+          echo "" >> "$FOLDER_NAME/README.md"
+          echo "<!-- Link to your solution files -->" >> "$FOLDER_NAME/README.md"
+          
+          echo "README.md created for $FOLDER_NAME"
+      
+      # Step 6: Verify the folder was created correctly
+      - name: Verify folder creation
+        run: |
+          FOLDER_NAME="${{ steps.create_folder.outputs.folder_name }}"
+          
+          echo "=== Verification Report ==="
+          echo "Folder Name: $FOLDER_NAME"
+          echo "Day Number: ${{ steps.create_folder.outputs.day_number }}"
+          echo ""
+          echo "=== Folder Contents ==="
+          ls -la "$FOLDER_NAME"
+          echo ""
+          echo "=== All Day Folders ==="
+          ls -d day[0-9][0-9][0-9] 2>/dev/null | sort -V || echo "No day folders found"
+          echo ""
+          
+          # Verify folder exists
+          if [ ! -d "$FOLDER_NAME" ]; then
+            echo "ERROR: Folder $FOLDER_NAME was not created!"
+            exit 1
+          fi
+          
+          echo "✓ Verification passed: Folder created successfully"
+      
+      # Step 7: Commit and push changes
       - name: Commit and push changes
         run: |
-          if [ "${{ env.skip }}" = "true" ]; then
+          FOLDER_NAME="${{ steps.create_folder.outputs.folder_name }}"
+          
+          # Add the new folder
+          git add "$FOLDER_NAME"
+          
+          # Check if there are changes to commit
+          if git diff --staged --quiet; then
             echo "No changes to commit"
             exit 0
           fi
           
-          FOLDER="${{ steps.get_day.outputs.day_folder }}"
-          git add "$FOLDER"
-          git commit -m "🚀 Create $FOLDER for daily DSA practice"
+          # Commit with a descriptive message
+          git commit -m "chore: create $FOLDER_NAME for daily coding practice
+
+          - Auto-generated folder with sequential numbering
+          - Created by GitHub Actions workflow
+          - Day number: ${{ steps.create_folder.outputs.day_number }}"
+          
+          # Push to the repository
           git push
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          
+          echo "✓ Changes committed and pushed successfully"
+      
+      # Step 8: Create a summary
+      - name: Create workflow summary
+        run: |
+          FOLDER_NAME="${{ steps.create_folder.outputs.folder_name }}"
+          DAY_NUMBER="${{ steps.create_folder.outputs.day_number }}"
+          
+          cat >> $GITHUB_STEP_SUMMARY << EOF
+          # 🎉 Daily Folder Created Successfully!
+          
+          ## Details
+          - **Folder Name:** \`$FOLDER_NAME\`
+          - **Day Number:** $DAY_NUMBER
+          - **Created:** $(date +"%Y-%m-%d %H:%M:%S UTC")
+          
+          ## What's Next?
+          1. Pull the latest changes: \`git pull\`
+          2. Navigate to the folder: \`cd $FOLDER_NAME\`
+          3. Start coding! 💻
+          
+          ## Folder Contents
+          \`\`\`
+          $(ls -la "$FOLDER_NAME")
+          \`\`\`
+          EOF
+          
+          echo "✓ Workflow completed successfully!"
