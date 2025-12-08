@@ -1,0 +1,142 @@
+name: Create Daily DSA Folder
+
+on:
+  workflow_dispatch:
+    inputs:
+      day_number:
+        description: 'Day number (optional - will auto-increment if not provided)'
+        required: false
+        type: string
+  schedule:
+    # Run at 00:00 UTC every day (adjust timezone as needed)
+    - cron: '0 0 * * *'
+
+jobs:
+  create-folder:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Set up Git
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+      
+      - name: Determine next day number
+        id: get_day
+        run: |
+          if [ -n "${{ github.event.inputs.day_number }}" ]; then
+            DAY_NUM="${{ github.event.inputs.day_number }}"
+          else
+            # Find the highest existing day folder
+            LAST_DAY=$(ls -d day??? 2>/dev/null | sort -r | head -n 1 | grep -oE '[0-9]+' || echo "0")
+            DAY_NUM=$((LAST_DAY + 1))
+          fi
+          
+          # Format with leading zeros (day001, day002, etc.)
+          DAY_FORMATTED=$(printf "day%03d" $DAY_NUM)
+          echo "day_folder=$DAY_FORMATTED" >> $GITHUB_OUTPUT
+          echo "Creating folder: $DAY_FORMATTED"
+      
+      - name: Create daily folder
+        run: |
+          FOLDER="${{ steps.get_day.outputs.day_folder }}"
+          
+          # Check if folder already exists
+          if [ -d "$FOLDER" ]; then
+            echo "Folder $FOLDER already exists. Skipping creation."
+            echo "skip=true" >> $GITHUB_ENV
+            exit 0
+          fi
+          
+          # Create the folder
+          mkdir -p "$FOLDER"
+          
+          # Create template app.py
+          cat > "$FOLDER/app.py" << 'EOF'
+# Day ${FOLDER} - DSA Practice
+
+def main():
+    pass
+
+if __name__ == "__main__":
+    main()
+EOF
+          
+          # Create a README for the day
+          cat > "$FOLDER/README.md" << EOF
+# ${FOLDER}
+
+## Problems Solved Today
+
+- [ ] Problem 1
+- [ ] Problem 2
+- [ ] Problem 3
+
+## Notes
+
+Add your notes here...
+EOF
+          
+          echo "Created folder: $FOLDER"
+          echo "skip=false" >> $GITHUB_ENV
+      
+      - name: Verify folder structure
+        run: |
+          if [ "${{ env.skip }}" = "true" ]; then
+            echo "Skipping verification"
+            exit 0
+          fi
+          
+          FOLDER="${{ steps.get_day.outputs.day_folder }}"
+          
+          echo "=== Final Verification ==="
+          echo "Folder created: $FOLDER"
+          echo ""
+          echo "Contents:"
+          ls -la "$FOLDER"
+          echo ""
+          echo "Files created:"
+          find "$FOLDER" -type f -exec echo "  - {}" \;
+          echo ""
+          echo "File previews:"
+          for file in "$FOLDER"/*; do
+            if [ -f "$file" ]; then
+              echo "--- $(basename $file) ---"
+              head -n 5 "$file"
+              echo ""
+            fi
+          done
+          
+          # Verify required files exist
+          if [ ! -f "$FOLDER/app.py" ]; then
+            echo "❌ ERROR: app.py not found!"
+            exit 1
+          fi
+          
+          if [ ! -f "$FOLDER/README.md" ]; then
+            echo "❌ ERROR: README.md not found!"
+            exit 1
+          fi
+          
+          echo "✅ All required files verified"
+      
+      - name: Commit and push changes
+        run: |
+          if [ "${{ env.skip }}" = "true" ]; then
+            echo "No changes to commit"
+            exit 0
+          fi
+          
+          FOLDER="${{ steps.get_day.outputs.day_folder }}"
+          git add "$FOLDER"
+          git commit -m "🚀 Create $FOLDER for daily DSA practice"
+          git push
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
