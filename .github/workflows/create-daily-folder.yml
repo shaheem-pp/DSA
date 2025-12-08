@@ -1,8 +1,14 @@
 name: Create Daily Coding Folder
 
 # Workflow triggers
-# This workflow can be triggered manually from the GitHub Actions tab
+# This workflow runs automatically at 12 AM Toronto time (EST/EDT) every day
+# and can also be triggered manually from the GitHub Actions tab
 on:
+  schedule:
+    # Runs at 12:00 AM Toronto time (5:00 AM UTC in EST, 4:00 AM UTC in EDT)
+    # Note: GitHub Actions uses UTC, so we use 5 AM UTC for Toronto EST (UTC-5)
+    # During EDT (UTC-4), this will run at 1 AM Toronto time
+    - cron: '0 5 * * *'
   workflow_dispatch:
     inputs:
       copy_template:
@@ -65,7 +71,7 @@ jobs:
       
       # Step 4: Copy template files if they exist and if requested
       - name: Copy template files
-        if: ${{ inputs.copy_template == 'true' || inputs.copy_template == true }}
+        if: ${{ inputs.copy_template == true || github.event_name == 'schedule' }}
         run: |
           FOLDER_NAME="${{ steps.create_folder.outputs.folder_name }}"
           DAY_NUMBER="${{ steps.create_folder.outputs.day_number }}"
